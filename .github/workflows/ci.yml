@@ -157,7 +157,6 @@ jobs:
           context: ./frontend
           load: true
           tags: sso-frontend
-          build-args: VITE_API_URL=/api/v1
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
 

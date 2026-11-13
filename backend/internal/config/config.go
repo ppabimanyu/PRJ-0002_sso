@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/mail"
 	"net/netip"
 	"net/url"
 	"strconv"
@@ -26,6 +27,15 @@ type Config struct {
 
 	RateLimitRequests int           `env:"RATE_LIMIT_REQUESTS" envDefault:"60"`
 	RateLimitWindow   time.Duration `env:"RATE_LIMIT_WINDOW" envDefault:"1m"`
+
+	SessionIdleTTL     time.Duration `env:"SESSION_IDLE_TTL" envDefault:"720h"`
+	SessionAbsoluteTTL time.Duration `env:"SESSION_ABSOLUTE_TTL" envDefault:"2160h"`
+
+	LoginMaxFailures   int           `env:"LOGIN_MAX_FAILURES" envDefault:"10"`
+	LoginFailureWindow time.Duration `env:"LOGIN_FAILURE_WINDOW" envDefault:"15m"`
+
+	BootstrapAdminEmail    string `env:"BOOTSTRAP_ADMIN_EMAIL" envDefault:""`
+	BootstrapAdminPassword string `env:"BOOTSTRAP_ADMIN_PASSWORD" envDefault:""`
 
 	LogLevel string `env:"LOG_LEVEL" envDefault:"info"`
 
@@ -79,6 +89,30 @@ func (c Config) validate() error {
 	}
 	if c.RateLimitWindow <= 0 {
 		return fmt.Errorf("RATE_LIMIT_WINDOW must be positive, got %s", c.RateLimitWindow)
+	}
+	if c.SessionIdleTTL <= 0 {
+		return fmt.Errorf("SESSION_IDLE_TTL must be positive, got %s", c.SessionIdleTTL)
+	}
+	if c.SessionAbsoluteTTL <= 0 {
+		return fmt.Errorf("SESSION_ABSOLUTE_TTL must be positive, got %s", c.SessionAbsoluteTTL)
+	}
+	if c.SessionIdleTTL > c.SessionAbsoluteTTL {
+		return fmt.Errorf("SESSION_IDLE_TTL must not exceed SESSION_ABSOLUTE_TTL")
+	}
+	if c.LoginMaxFailures < 1 {
+		return fmt.Errorf("LOGIN_MAX_FAILURES must be at least 1, got %d", c.LoginMaxFailures)
+	}
+	if c.LoginFailureWindow <= 0 {
+		return fmt.Errorf("LOGIN_FAILURE_WINDOW must be positive, got %s", c.LoginFailureWindow)
+	}
+	if c.BootstrapAdminPassword != "" && c.BootstrapAdminEmail == "" {
+		return fmt.Errorf("BOOTSTRAP_ADMIN_EMAIL is required when BOOTSTRAP_ADMIN_PASSWORD is set")
+	}
+	if c.BootstrapAdminEmail != "" {
+		address, err := mail.ParseAddress(c.BootstrapAdminEmail)
+		if err != nil || address.Address != c.BootstrapAdminEmail {
+			return fmt.Errorf("BOOTSTRAP_ADMIN_EMAIL must be a valid email address, got %q", c.BootstrapAdminEmail)
+		}
 	}
 	if c.OTelTraceSampleRatio < 0 || c.OTelTraceSampleRatio > 1 {
 		return fmt.Errorf("OTEL_TRACES_SAMPLER_ARG must be between 0 and 1, got %v", c.OTelTraceSampleRatio)

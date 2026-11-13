@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/ppabimanyu/sso/internal/auth"
 	"github.com/ppabimanyu/sso/internal/domain"
 	"github.com/ppabimanyu/sso/internal/middleware"
 	"github.com/ppabimanyu/sso/internal/pkg/problem"
@@ -22,6 +23,7 @@ type RouterOptions struct {
 	TrustedProxies []netip.Prefix
 	RateLimit      func(http.Handler) http.Handler
 	MaxBodyBytes   int64
+	AuthService    *auth.Service
 }
 
 // NewRouter builds the HTTP handler with the full middleware chain.
@@ -47,9 +49,27 @@ func NewRouter(opts RouterOptions) http.Handler {
 	router.Get("/healthz", health.Live)
 	router.Get("/readyz", health.Ready)
 
-	router.Route("/api/v1", func(_ chi.Router) {
-		// Feature routes mount here. Each feature gets its own
-		// httphandler_<resource>.go file and a port in domain.
+	router.Route("/api/v1", func(api chi.Router) {
+		api.Use(middleware.SameOrigin)
+
+		if opts.AuthService != nil {
+			authHandler := NewAuthHandler(opts.AuthService, opts.Logger, func(r *http.Request) auth.RequestMeta {
+				return auth.RequestMeta{
+					IP:        middleware.ClientIP(r),
+					UserAgent: r.UserAgent(),
+					RequestID: middleware.RequestIDFromContext(r.Context()),
+				}
+			})
+			api.Route("/auth", func(authRoutes chi.Router) {
+				authRoutes.Post("/login", authHandler.Login)
+				authRoutes.Post("/logout", authHandler.Logout)
+				authRoutes.Get("/session", authHandler.Session)
+			})
+			api.Group(func(account chi.Router) {
+				account.Use(authHandler.RequireSession)
+				account.Get("/me", authHandler.Me)
+			})
+		}
 	})
 
 	router.NotFound(func(w http.ResponseWriter, r *http.Request) {

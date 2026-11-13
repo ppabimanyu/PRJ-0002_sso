@@ -34,7 +34,7 @@ func RateLimit(client *redis.Client, limit int, window time.Duration, logger *sl
 			ctx, cancel := context.WithTimeout(r.Context(), 250*time.Millisecond)
 			defer cancel()
 
-			key := fmt.Sprintf("ratelimit:%s:%s", clientIP(r), r.URL.Path)
+			key := fmt.Sprintf("ratelimit:%s:%s", ClientIP(r), r.URL.Path)
 			count, err := fixedWindow.Run(ctx, client, []string{key}, windowMillis).Int64()
 			if err != nil {
 				logger.WarnContext(r.Context(), "rate limit unavailable, failing open", "error", err)
@@ -60,7 +60,9 @@ func RateLimit(client *redis.Client, limit int, window time.Duration, logger *sl
 	}
 }
 
-func clientIP(r *http.Request) string {
+// ClientIP returns the request peer address without its port. RealIP has
+// already replaced the peer when a trusted proxy supplied X-Forwarded-For.
+func ClientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

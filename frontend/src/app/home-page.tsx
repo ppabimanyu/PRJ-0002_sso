@@ -90,9 +90,8 @@ export function HomePage() {
               One identity for every project.
             </h1>
             <p className="max-w-[60ch] text-base leading-relaxed text-muted-foreground">
-              An OIDC/OAuth 2.0 identity provider for personal projects. The foundation is running:
-              HTTP server, PostgreSQL, Redis, Mailpit, observability, and a typed React shell.
-              Authentication flows arrive in the next milestones.
+              An OIDC/OAuth 2.0 identity provider for personal projects. Password login, SSO
+              Sessions, and the account shell are live. OIDC flows arrive in the next milestones.
             </p>
             {import.meta.env.DEV ? (
               <Link

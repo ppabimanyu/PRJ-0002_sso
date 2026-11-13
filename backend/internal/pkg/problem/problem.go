@@ -46,6 +46,8 @@ func FromError(err error) *Problem {
 		return New(http.StatusConflict, "Conflict", "The request conflicts with the current state.")
 	case errors.Is(err, domain.ErrValidation):
 		return New(http.StatusBadRequest, "Bad Request", strings.TrimPrefix(err.Error(), domain.ErrValidation.Error()+": "))
+	case errors.Is(err, domain.ErrUnauthorized), errors.Is(err, domain.ErrInvalidCredentials):
+		return New(http.StatusUnauthorized, "Unauthorized", "Authentication is required.")
 	default:
 		return New(http.StatusInternalServerError, "Internal Server Error", "")
 	}

@@ -10,3 +10,6 @@ sql:
         sql_package: "pgx/v5"
         emit_interface: false
         emit_json_tags: false
+        overrides:
+          - db_type: "citext"
+            go_type: "string"

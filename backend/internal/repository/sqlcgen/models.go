@@ -3,3 +3,55 @@
 //   sqlc v1.31.1
 
 package sqlcgen
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type AuditEvent struct {
+	ID          pgtype.UUID
+	OccurredAt  pgtype.Timestamptz
+	ActorType   string
+	ActorUserID pgtype.UUID
+	Action      string
+	TargetType  string
+	TargetID    pgtype.UUID
+	Ip          string
+	UserAgent   string
+	RequestID   string
+	Metadata    []byte
+}
+
+type PasswordCredential struct {
+	UserID       pgtype.UUID
+	PasswordHash string
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type Session struct {
+	ID                pgtype.UUID
+	TokenHash         []byte
+	UserID            pgtype.UUID
+	AuthMethod        string
+	MfaAt             pgtype.Timestamptz
+	Ip                string
+	UserAgent         string
+	CreatedAt         pgtype.Timestamptz
+	LastSeenAt        pgtype.Timestamptz
+	IdleExpiresAt     pgtype.Timestamptz
+	AbsoluteExpiresAt pgtype.Timestamptz
+	RevokedAt         pgtype.Timestamptz
+}
+
+type User struct {
+	ID              pgtype.UUID
+	Email           string
+	Name            string
+	PictureUrl      pgtype.Text
+	IsAdmin         bool
+	EmailVerifiedAt pgtype.Timestamptz
+	DisabledAt      pgtype.Timestamptz
+	DeletedAt       pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}

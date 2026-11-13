@@ -18,3 +18,6 @@ deploy/.env
 
 # Verification evidence and scratch state (see .claude/skills/verify)
 .verify/
+
+# Local decision trails and run checklists
+.audit/
