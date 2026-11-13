@@ -1,0 +1,20 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+*.local
+*.log
+
+backend/bin/
+backend/tmp/
+backend/coverage.out
+
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.vite/
+
+deploy/.env
+
+# Verification evidence and scratch state (see .claude/skills/verify)
+.verify/
