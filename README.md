@@ -64,13 +64,22 @@ Goose tidak perlu dipasang lokal jika memakai Docker Compose. Perintah `make mig
 cp .env.example .env
 ```
 
-2. Jalankan stack.
+2. Isi Admin pertama di `.env` sebelum start pertama.
+
+```bash
+BOOTSTRAP_ADMIN_EMAIL=you@example.com
+BOOTSTRAP_ADMIN_PASSWORD=pilih-password-minimal-12-karakter
+```
+
+Admin dibuat saat backend start jika email tersebut belum ada. Setelah login pertama berhasil, `BOOTSTRAP_ADMIN_PASSWORD` boleh dikosongkan; restart tidak akan mengubah password atau mempromosikan User lain.
+
+3. Jalankan stack.
 
 ```bash
 make dev
 ```
 
-3. Buka http://localhost:3000.
+4. Buka http://localhost:3000, masuk lewat halaman Sign in, lalu buka account shell.
 
 Compose menjalankan PostgreSQL, Redis, Mailpit, migrasi goose, backend, dan frontend. Frontend di port 3000 mem-proxy `/api`, `/healthz`, dan `/readyz` ke backend.
 
@@ -163,7 +172,7 @@ make test
 make test-integration
 ```
 
-`make test` menjalankan unit test backend dan frontend. `make test-integration` menjalankan test repository dengan PostgreSQL dari testcontainers dan membutuhkan Docker.
+`make test` menjalankan unit test backend dan frontend. `make test-integration` menjalankan test HTTP seam dengan PostgreSQL dan Redis dari testcontainers dan membutuhkan Docker. Test tersebut mencakup login Admin hasil bootstrap, logout, User disabled, Audit Event login, serta lockout sementara.
 
 ## Konfigurasi
 
@@ -179,11 +188,19 @@ Semua variabel ada di `.env.example`. Docker Compose dan Vite membaca `.env` yan
 | `TRUSTED_PROXY_CIDRS` | kosong | CIDR reverse proxy yang boleh mengirim `X-Forwarded-For` |
 | `RATE_LIMIT_REQUESTS` | `60` | Jumlah request per window |
 | `RATE_LIMIT_WINDOW` | `1m` | Panjang window rate limit |
+| `SESSION_IDLE_TTL` | `720h` | Batas idle Session |
+| `SESSION_ABSOLUTE_TTL` | `2160h` | Batas absolut Session |
+| `LOGIN_MAX_FAILURES` | `10` | Kegagalan login sebelum lockout sementara |
+| `LOGIN_FAILURE_WINDOW` | `15m` | Window hitung kegagalan dan durasi lockout |
+| `BOOTSTRAP_ADMIN_EMAIL` | kosong | Email Admin pertama yang dibuat saat start |
+| `BOOTSTRAP_ADMIN_PASSWORD` | kosong | Password Admin pertama; hanya dipakai saat pembuatan |
 | `LOG_LEVEL` | `info` | Level log |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | kosong | Endpoint OTLP, kosong berarti export dimatikan |
 | `OTEL_SERVICE_NAME` | `sso-api` | Nama service di trace |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` | Rasio sampling trace |
-| `VITE_API_URL` | `/api/v1` | Base URL API untuk frontend |
+| `VITE_API_URL` | kosong | Origin API; kosong berarti same-origin |
+
+Login dibatasi 10 kegagalan per 15 menit untuk pasangan akun dan IP, lalu ditahan sementara. Counter disimpan di Redis dengan fallback in-process agar brute force tetap terbatas saat Redis tidak tersedia. Counter direset setelah login sukses.
 
 Rate limit memakai Redis dan fail-open. Jika Redis tidak tersedia, request tetap dilayani dan error dicatat di log.
 

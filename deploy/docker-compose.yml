@@ -73,7 +73,7 @@ services:
     build:
       context: ../frontend
       args:
-        VITE_API_URL: /api/v1
+        VITE_API_URL: ${VITE_API_URL:-}
         VITE_APP_NAME: ${VITE_APP_NAME:-SSO}
         VITE_MAINTENANCE_MODE: ${VITE_MAINTENANCE_MODE:-false}
     depends_on:

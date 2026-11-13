@@ -501,6 +501,8 @@ flowchart LR
 | `APP_ENCRYPTION_KEY` | wajib | 32 byte base64 untuk AES-GCM |
 | `SESSION_IDLE_TTL` | `720h` | Idle Session |
 | `SESSION_ABSOLUTE_TTL` | `2160h` | Absolute Session |
+| `LOGIN_MAX_FAILURES` | `10` | Kegagalan login sebelum lockout |
+| `LOGIN_FAILURE_WINDOW` | `15m` | Window kegagalan dan durasi lockout |
 | `ACCESS_TOKEN_TTL` | `15m` | Access Token |
 | `REFRESH_TOKEN_TTL` | `720h` | Refresh Token |
 | `SMTP_URL` | wajib | Koneksi SMTP |
@@ -510,6 +512,7 @@ flowchart LR
 | `GITHUB_CLIENT_ID` | kosong | Social login |
 | `GITHUB_CLIENT_SECRET` | kosong | Social login |
 | `BOOTSTRAP_ADMIN_EMAIL` | kosong | Admin pertama saat seed |
+| `BOOTSTRAP_ADMIN_PASSWORD` | kosong | Password Admin pertama; hanya dipakai saat pembuatan |
 | `RATE_LIMIT_REQUESTS` | `60` | Limit umum |
 | `RATE_LIMIT_WINDOW` | `1m` | Window umum |
 | `OTEL_*` | kosong | Observability |

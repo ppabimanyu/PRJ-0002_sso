@@ -7,6 +7,134 @@
         "version": "0.1.0"
     },
     "paths": {
+        "/api/v1/auth/login": {
+            "post": {
+                "description": "Verifies email and password, creates a Session, and sets the host-only Session cookie.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Password login",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/httphandler.LoginRequest"
+                            }
+                        }
+                    },
+                    "description": "Email and password",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/httphandler.LoginResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Problem"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Problem"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Problem"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/logout": {
+            "post": {
+                "description": "Revokes the current Session and clears the Session cookie. The endpoint is idempotent.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Logout",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/session": {
+            "get": {
+                "description": "Returns the authenticated User and Session expiry, or authenticated false when there is no valid cookie.",
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Current Session",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/httphandler.SessionResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/me": {
+            "get": {
+                "description": "Returns the profile of the authenticated User.",
+                "tags": [
+                    "account"
+                ],
+                "summary": "Current profile",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/httphandler.UserResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/problem.Problem"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/healthz": {
             "get": {
                 "description": "Returns 200 while the process is running.",
@@ -79,6 +207,89 @@
                     "status": {
                         "type": "string",
                         "example": "ok"
+                    }
+                }
+            },
+            "httphandler.LoginRequest": {
+                "type": "object",
+                "required": [
+                    "email",
+                    "password"
+                ],
+                "properties": {
+                    "email": {
+                        "type": "string"
+                    },
+                    "password": {
+                        "type": "string"
+                    }
+                }
+            },
+            "httphandler.LoginResponse": {
+                "type": "object",
+                "properties": {
+                    "user": {
+                        "$ref": "#/components/schemas/httphandler.UserResponse"
+                    }
+                }
+            },
+            "httphandler.SessionResponse": {
+                "type": "object",
+                "properties": {
+                    "authenticated": {
+                        "type": "boolean"
+                    },
+                    "expiresAt": {
+                        "type": "string"
+                    },
+                    "user": {
+                        "$ref": "#/components/schemas/httphandler.UserResponse"
+                    }
+                }
+            },
+            "httphandler.UserResponse": {
+                "type": "object",
+                "properties": {
+                    "createdAt": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string"
+                    },
+                    "emailVerified": {
+                        "type": "boolean"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "isAdmin": {
+                        "type": "boolean"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "pictureUrl": {
+                        "type": "string"
+                    }
+                }
+            },
+            "problem.Problem": {
+                "type": "object",
+                "properties": {
+                    "detail": {
+                        "type": "string"
+                    },
+                    "instance": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "integer"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "type": {
+                        "type": "string"
                     }
                 }
             }

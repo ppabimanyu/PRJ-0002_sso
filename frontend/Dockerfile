@@ -10,8 +10,9 @@ RUN npm ci
 
 COPY . .
 
-# Same-origin deployments use a relative path such as /api/v1.
-ARG VITE_API_URL=/api/v1
+# Same-origin deployments leave this empty. Set a full origin only when the
+# frontend and API are served from different origins.
+ARG VITE_API_URL=
 ARG VITE_APP_NAME=SSO
 ARG VITE_MAINTENANCE_MODE=false
 ENV VITE_API_URL=${VITE_API_URL}

@@ -7,7 +7,9 @@ import "errors"
 // Sentinel errors that handlers and repositories use to describe a failed
 // operation without leaking infrastructure details.
 var (
-	ErrNotFound   = errors.New("not found")
-	ErrConflict   = errors.New("conflict")
-	ErrValidation = errors.New("validation failed")
+	ErrNotFound           = errors.New("not found")
+	ErrConflict           = errors.New("conflict")
+	ErrValidation         = errors.New("validation failed")
+	ErrUnauthorized       = errors.New("unauthorized")
+	ErrInvalidCredentials = errors.New("invalid credentials")
 )

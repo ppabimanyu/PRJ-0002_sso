@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ppabimanyu/sso/internal/auth"
 	"github.com/ppabimanyu/sso/internal/config"
 	"github.com/ppabimanyu/sso/internal/domain"
 	"github.com/ppabimanyu/sso/internal/httphandler"
@@ -65,6 +66,25 @@ func run() error {
 		"redis":    repository.NewRedisHealth(redisClient),
 	}
 
+	authRepository := repository.NewPgAuth(pool)
+	authService, err := auth.NewService(
+		auth.Config{
+			SessionIdleTTL:     cfg.SessionIdleTTL,
+			SessionAbsoluteTTL: cfg.SessionAbsoluteTTL,
+		},
+		authRepository,
+		authRepository,
+		authRepository,
+		repository.NewLoginAttempts(redisClient, cfg.LoginMaxFailures, cfg.LoginFailureWindow),
+		logger,
+	)
+	if err != nil {
+		return fmt.Errorf("create auth service: %w", err)
+	}
+	if err := authService.BootstrapAdmin(ctx, cfg.BootstrapAdminEmail, cfg.BootstrapAdminPassword); err != nil {
+		return fmt.Errorf("bootstrap admin: %w", err)
+	}
+
 	handler := httphandler.NewRouter(httphandler.RouterOptions{
 		Logger:         logger,
 		Readiness:      readiness,
@@ -72,6 +92,7 @@ func run() error {
 		TrustedProxies: cfg.TrustedProxies,
 		RateLimit:      middleware.RateLimit(redisClient, cfg.RateLimitRequests, cfg.RateLimitWindow, logger),
 		MaxBodyBytes:   cfg.HTTPMaxBodyBytes,
+		AuthService:    authService,
 	})
 
 	server := &http.Server{

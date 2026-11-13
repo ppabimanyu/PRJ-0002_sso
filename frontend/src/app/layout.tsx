@@ -4,6 +4,7 @@ import { BrandLockup, BrandMark } from "@/brand/brand-mark";
 import { appName } from "@/brand/brand";
 import { ServiceChart } from "@/brand/service-chart";
 import { ThemeToggle } from "@/components/shared/theme-toggle";
+import { useSession } from "@/features/auth/use-session";
 import { cn } from "@/lib/utils";
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -13,6 +14,9 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   );
 
 export function Layout() {
+  const session = useSession();
+  const authenticated = session.data?.authenticated === true;
+
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
       <div className="h-[3px] bg-brand" aria-hidden="true" />
@@ -26,6 +30,15 @@ export function Layout() {
               <NavLink to="/" end className={navLinkClass}>
                 Home
               </NavLink>
+              {authenticated ? (
+                <NavLink to="/account" className={navLinkClass}>
+                  Account
+                </NavLink>
+              ) : (
+                <NavLink to="/login" className={navLinkClass}>
+                  Sign in
+                </NavLink>
+              )}
               {import.meta.env.DEV ? (
                 <NavLink to="/_gallery" className={navLinkClass}>
                   Gallery
