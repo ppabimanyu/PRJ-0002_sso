@@ -33,31 +33,30 @@ func HashSessionToken(raw string) []byte {
 	return sum[:]
 }
 
-// SessionCookie builds the host-only Session cookie. The browser keeps it for
-// the absolute TTL; the server still enforces the shorter idle TTL.
-func SessionCookie(token string, absoluteTTL time.Duration, now time.Time) *http.Cookie {
-	return &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(absoluteTTL / time.Second),
-		Expires:  now.Add(absoluteTTL).UTC(),
-	}
+// SessionCookie builds the host-only Session cookie. The browser keeps it until
+// the absolute expiry; the server still enforces the shorter idle TTL.
+func SessionCookie(token string, expiresAt, now time.Time) *http.Cookie {
+	cookie := sessionCookieBase() // #nosec G124 -- sessionCookieBase sets Secure, HttpOnly, SameSite=Lax, and Path=/.
+	cookie.Value = token
+	cookie.MaxAge = int(expiresAt.Sub(now) / time.Second)
+	cookie.Expires = expiresAt.UTC()
+	return cookie
 }
 
 // ExpiredSessionCookie clears the Session cookie in the browser.
 func ExpiredSessionCookie() *http.Cookie {
+	cookie := sessionCookieBase() // #nosec G124 -- sessionCookieBase sets Secure, HttpOnly, SameSite=Lax, and Path=/.
+	cookie.MaxAge = -1
+	cookie.Expires = time.Unix(1, 0).UTC()
+	return cookie
+}
+
+func sessionCookieBase() *http.Cookie {
 	return &http.Cookie{
 		Name:     SessionCookieName,
-		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-		Expires:  time.Unix(1, 0).UTC(),
 	}
 }

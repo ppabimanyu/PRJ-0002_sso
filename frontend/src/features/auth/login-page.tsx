@@ -4,6 +4,7 @@ import { Navigate, useLocation } from "react-router-dom";
 import { BrandMark } from "@/brand/brand-mark";
 import { appName } from "@/brand/brand";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -35,6 +36,7 @@ export function LoginPage() {
   const session = useSession();
   const login = useLogin();
   const location = useLocation();
+  const [step, setStep] = useState<"email" | "password">("email");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +55,13 @@ export function LoginPage() {
     return <Navigate to={from} replace />;
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleEmailSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setStep("password");
+  }
+
+  async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     try {
@@ -61,6 +69,12 @@ export function LoginPage() {
     } catch (submitError) {
       setError(loginErrorMessage(submitError));
     }
+  }
+
+  function changeEmail() {
+    setError(null);
+    setPassword("");
+    setStep("email");
   }
 
   return (
@@ -78,53 +92,76 @@ export function LoginPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Email and password</CardTitle>
+          <CardTitle>{step === "email" ? "Your email" : "Your password"}</CardTitle>
           <CardDescription>
             One account works across every Project that trusts this SSO service.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
-            {error ? (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            ) : null}
+          {step === "email" ? (
+            <form className="flex flex-col gap-5" onSubmit={handleEmailSubmit}>
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="username"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-              />
-            </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="username"
+                  autoFocus
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
-              />
-            </div>
+              <Button type="submit" className="mt-1 w-full">
+                Continue
+              </Button>
+            </form>
+          ) : (
+            <form className="flex flex-col gap-5" onSubmit={handlePasswordSubmit}>
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
 
-            <SubmitButton
-              className="mt-1 w-full"
-              isSubmitting={login.isPending}
-              pendingLabel="Signing in"
-            >
-              Sign in
-            </SubmitButton>
-          </form>
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-border px-3 py-2 text-sm">
+                <span className="truncate">{email}</span>
+                <Button type="button" variant="link" className="h-auto p-0" onClick={changeEmail}>
+                  Change
+                </Button>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  autoFocus
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+              </div>
+
+              <SubmitButton
+                className="mt-1 w-full"
+                isSubmitting={login.isPending}
+                pendingLabel="Signing in"
+              >
+                Sign in
+              </SubmitButton>
+            </form>
+          )}
         </CardContent>
       </Card>
 

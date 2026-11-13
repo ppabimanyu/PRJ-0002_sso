@@ -88,9 +88,30 @@ func (r *PgAuth) CreateUserWithPassword(ctx context.Context, user domain.User, p
 	return nil
 }
 
-// CreateSession stores a Session and the hash of its opaque token.
-func (r *PgAuth) CreateSession(ctx context.Context, session domain.Session, tokenHash []byte) error {
-	err := r.queries.CreateSession(ctx, sqlcgen.CreateSessionParams{
+// CreateSessionWithAudit stores the Session and its login Audit Event in one
+// transaction. A login cannot succeed without the audit record.
+func (r *PgAuth) CreateSessionWithAudit(ctx context.Context, session domain.Session, tokenHash []byte, event domain.AuditEvent) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin create session: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	queries := sqlcgen.New(tx)
+	if err := r.createSession(ctx, queries, session, tokenHash); err != nil {
+		return err
+	}
+	if err := insertAuditEvent(ctx, queries, event); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit create session: %w", err)
+	}
+	return nil
+}
+
+func (r *PgAuth) createSession(ctx context.Context, queries *sqlcgen.Queries, session domain.Session, tokenHash []byte) error {
+	err := queries.CreateSession(ctx, sqlcgen.CreateSessionParams{
 		ID:                pgUUID(session.ID),
 		TokenHash:         tokenHash,
 		UserID:            pgUUID(session.UserID),
@@ -155,6 +176,10 @@ func (r *PgAuth) RevokeSession(ctx context.Context, sessionID uuid.UUID, revoked
 
 // RecordAuditEvent appends an Audit Event.
 func (r *PgAuth) RecordAuditEvent(ctx context.Context, event domain.AuditEvent) error {
+	return insertAuditEvent(ctx, r.queries, event)
+}
+
+func insertAuditEvent(ctx context.Context, queries *sqlcgen.Queries, event domain.AuditEvent) error {
 	metadata := event.Metadata
 	if metadata == nil {
 		metadata = map[string]string{}
@@ -164,7 +189,7 @@ func (r *PgAuth) RecordAuditEvent(ctx context.Context, event domain.AuditEvent) 
 		return fmt.Errorf("encode audit metadata: %w", err)
 	}
 
-	err = r.queries.InsertAuditEvent(ctx, sqlcgen.InsertAuditEventParams{
+	err = queries.InsertAuditEvent(ctx, sqlcgen.InsertAuditEventParams{
 		ID:          pgUUID(event.ID),
 		OccurredAt:  pgTime(event.OccurredAt),
 		ActorType:   event.ActorType,

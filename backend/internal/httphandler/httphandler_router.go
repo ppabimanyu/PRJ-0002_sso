@@ -53,7 +53,13 @@ func NewRouter(opts RouterOptions) http.Handler {
 		api.Use(middleware.SameOrigin)
 
 		if opts.AuthService != nil {
-			authHandler := NewAuthHandler(opts.AuthService, opts.Logger)
+			authHandler := NewAuthHandler(opts.AuthService, opts.Logger, func(r *http.Request) auth.RequestMeta {
+				return auth.RequestMeta{
+					IP:        middleware.ClientIP(r),
+					UserAgent: r.UserAgent(),
+					RequestID: middleware.RequestIDFromContext(r.Context()),
+				}
+			})
 			api.Route("/auth", func(authRoutes chi.Router) {
 				authRoutes.Post("/login", authHandler.Login)
 				authRoutes.Post("/logout", authHandler.Logout)

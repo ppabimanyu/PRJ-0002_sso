@@ -72,10 +72,12 @@ func run() error {
 			SessionIdleTTL:     cfg.SessionIdleTTL,
 			SessionAbsoluteTTL: cfg.SessionAbsoluteTTL,
 		},
-		authRepository,
-		authRepository,
-		authRepository,
-		repository.NewLoginAttempts(redisClient, cfg.LoginMaxFailures, cfg.LoginFailureWindow),
+		auth.Dependencies{
+			Users:    authRepository,
+			Sessions: authRepository,
+			Audit:    authRepository,
+			Attempts: repository.NewLoginAttempts(redisClient, cfg.LoginMaxFailures, cfg.LoginFailureWindow),
+		},
 		logger,
 	)
 	if err != nil {

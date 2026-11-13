@@ -17,6 +17,11 @@ const admin = {
   createdAt: "2026-11-13T08:00:00Z",
 };
 
+async function beginSignIn(email = "admin@example.com") {
+  await userEvent.type(await screen.findByLabelText("Email"), email);
+  await userEvent.click(screen.getByRole("button", { name: "Continue" }));
+}
+
 function renderLogin() {
   return renderWithQueryClient(
     <MemoryRouter initialEntries={["/login"]}>
@@ -43,7 +48,7 @@ describe("LoginPage", () => {
 
     renderLogin();
 
-    await userEvent.type(await screen.findByLabelText("Email"), "admin@example.com");
+    await beginSignIn();
     await userEvent.type(screen.getByLabelText("Password"), "correct horse battery staple");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -68,7 +73,7 @@ describe("LoginPage", () => {
 
     renderLogin();
 
-    await userEvent.type(await screen.findByLabelText("Email"), "admin@example.com");
+    await beginSignIn();
     await userEvent.type(screen.getByLabelText("Password"), "wrong password");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
@@ -93,7 +98,7 @@ describe("LoginPage", () => {
 
     renderLogin();
 
-    await userEvent.type(await screen.findByLabelText("Email"), "admin@example.com");
+    await beginSignIn();
     await userEvent.type(screen.getByLabelText("Password"), "wrong password");
     await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
 

@@ -1,7 +1,6 @@
 import createClient, { type Middleware } from "openapi-fetch";
 
 import type { paths } from "@/types/api";
-import { apiBaseUrl } from "./config";
 import { toApiError } from "./problem";
 
 const errorMiddleware: Middleware = {
@@ -14,9 +13,8 @@ const errorMiddleware: Middleware = {
   },
 };
 
-export const apiClient = createClient<paths>({ baseUrl: apiBaseUrl });
-
-export const healthClient = createClient<paths>({ baseUrl: "" });
+// ADR 0005 keeps the auth UI and API on one origin, and generated paths already
+// include /api/v1. The empty base URL makes every request same-origin.
+export const apiClient = createClient<paths>({ baseUrl: "" });
 
 apiClient.use(errorMiddleware);
-healthClient.use(errorMiddleware);

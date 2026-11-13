@@ -52,6 +52,15 @@ func (e *BlockedError) Error() string {
 	return fmt.Sprintf("login blocked for %s", e.RetryAfter.Round(time.Second))
 }
 
+// Dependencies are the domain ports the auth module needs. Naming them keeps
+// the wiring readable when one adapter implements several ports.
+type Dependencies struct {
+	Users    domain.UserStore
+	Sessions domain.SessionStore
+	Audit    domain.AuditStore
+	Attempts domain.LoginAttemptStore
+}
+
 // Service owns password login, Session validation, logout, and Admin
 // bootstrap. It depends only on domain ports.
 type Service struct {
@@ -67,14 +76,10 @@ type Service struct {
 
 // NewService wires the authentication module. TTL validation fails fast so a
 // misconfigured deployment never issues a Session with an impossible lifetime.
-func NewService(
-	cfg Config,
-	users domain.UserStore,
-	sessions domain.SessionStore,
-	audit domain.AuditStore,
-	attempts domain.LoginAttemptStore,
-	logger *slog.Logger,
-) (*Service, error) {
+func NewService(cfg Config, deps Dependencies, logger *slog.Logger) (*Service, error) {
+	if deps.Users == nil || deps.Sessions == nil || deps.Audit == nil || deps.Attempts == nil {
+		return nil, fmt.Errorf("auth dependencies are incomplete")
+	}
 	if cfg.SessionIdleTTL <= 0 {
 		return nil, fmt.Errorf("session idle TTL must be positive")
 	}
@@ -89,10 +94,10 @@ func NewService(
 	}
 
 	return &Service{
-		users:       users,
-		sessions:    sessions,
-		audit:       audit,
-		attempts:    attempts,
+		users:       deps.Users,
+		sessions:    deps.Sessions,
+		audit:       deps.Audit,
+		attempts:    deps.Attempts,
 		logger:      logger,
 		idleTTL:     cfg.SessionIdleTTL,
 		absoluteTTL: cfg.SessionAbsoluteTTL,
@@ -163,7 +168,7 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (LoginResult, err
 	session := domain.Session{
 		ID:                sessionID,
 		UserID:            user.ID,
-		AuthMethod:        "password",
+		AuthMethod:        domain.AuthMethodPassword,
 		IP:                input.IP,
 		UserAgent:         input.UserAgent,
 		CreatedAt:         now,
@@ -171,14 +176,17 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (LoginResult, err
 		IdleExpiresAt:     now.Add(s.idleTTL),
 		AbsoluteExpiresAt: now.Add(s.absoluteTTL),
 	}
-	if err := s.sessions.CreateSession(ctx, session, tokenHash); err != nil {
+	event, err := s.newAuditEvent(s.loginAuditEvent(&user, input.RequestMeta, domain.ActionLoginSucceeded, ""))
+	if err != nil {
+		return LoginResult{}, err
+	}
+	if err := s.sessions.CreateSessionWithAudit(ctx, session, tokenHash, event); err != nil {
 		return LoginResult{}, fmt.Errorf("create session: %w", err)
 	}
 
 	if err := s.attempts.Reset(ctx, email, input.IP); err != nil {
 		s.logger.WarnContext(ctx, "reset login lockout", "error", err)
 	}
-	s.recordLoginAudit(ctx, &user, input.RequestMeta, domain.ActionLoginSucceeded, "password")
 
 	return LoginResult{User: user, Session: session, Token: token}, nil
 }
@@ -283,7 +291,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, email, password string) er
 	switch {
 	case err == nil:
 		if !existing.IsAdmin {
-			s.logger.WarnContext(ctx, "bootstrap admin email belongs to a non-admin user", "email", email)
+			s.logger.WarnContext(ctx, "bootstrap admin email belongs to a non-admin user", "user_id", existing.ID)
 		}
 		return nil
 	case !errors.Is(err, domain.ErrNotFound):
@@ -291,7 +299,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, email, password string) er
 	}
 
 	if password == "" {
-		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD is required to create the bootstrap admin %s", email)
+		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD is required to create the bootstrap admin")
 	}
 	if err := ValidatePassword(password, email); err != nil {
 		return fmt.Errorf("bootstrap admin password: %w", err)
@@ -317,7 +325,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, email, password string) er
 
 	if err := s.users.CreateUserWithPassword(ctx, user, passwordHash); err != nil {
 		if errors.Is(err, domain.ErrConflict) {
-			s.logger.InfoContext(ctx, "bootstrap admin already exists", "email", email)
+			s.logger.InfoContext(ctx, "bootstrap admin already exists")
 			return nil
 		}
 		return fmt.Errorf("create bootstrap admin: %w", err)
@@ -328,7 +336,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, email, password string) er
 		Action:     domain.ActionAdminBootstrap,
 		TargetType: domain.TargetTypeUser,
 		TargetID:   &user.ID,
-		Metadata:   map[string]string{"email": user.Email},
+		Metadata:   map[string]string{"source": "configuration"},
 	})
 	return nil
 }
@@ -342,13 +350,17 @@ func (s *Service) recordLoginFailure(ctx context.Context, user *domain.User, inp
 }
 
 func (s *Service) recordLoginAudit(ctx context.Context, user *domain.User, meta RequestMeta, action, reason string) {
+	s.recordAudit(ctx, s.loginAuditEvent(user, meta, action, reason))
+}
+
+func (s *Service) loginAuditEvent(user *domain.User, meta RequestMeta, action, reason string) domain.AuditEvent {
 	event := domain.AuditEvent{
 		ActorType: domain.ActorTypeAnonymous,
 		Action:    action,
 		IP:        meta.IP,
 		UserAgent: meta.UserAgent,
 		RequestID: meta.RequestID,
-		Metadata:  map[string]string{"method": "password"},
+		Metadata:  map[string]string{"method": domain.AuthMethodPassword},
 	}
 	if user != nil {
 		userID := user.ID
@@ -360,24 +372,32 @@ func (s *Service) recordLoginAudit(ctx context.Context, user *domain.User, meta 
 	if action == domain.ActionLoginFailed {
 		event.Metadata["reason"] = reason
 	}
-	s.recordAudit(ctx, event)
+	return event
 }
 
 func (s *Service) recordAudit(ctx context.Context, event domain.AuditEvent) {
+	prepared, err := s.newAuditEvent(event)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "prepare audit event", "error", err)
+		return
+	}
+	if err := s.audit.RecordAuditEvent(ctx, prepared); err != nil {
+		s.logger.ErrorContext(ctx, "record audit event", "action", prepared.Action, "error", err)
+	}
+}
+
+func (s *Service) newAuditEvent(event domain.AuditEvent) (domain.AuditEvent, error) {
 	if event.ID == uuid.Nil {
 		id, err := uuid.NewV7()
 		if err != nil {
-			s.logger.ErrorContext(ctx, "generate audit event id", "error", err)
-			return
+			return domain.AuditEvent{}, fmt.Errorf("generate audit event id: %w", err)
 		}
 		event.ID = id
 	}
 	if event.OccurredAt.IsZero() {
 		event.OccurredAt = s.now()
 	}
-	if err := s.audit.RecordAuditEvent(ctx, event); err != nil {
-		s.logger.ErrorContext(ctx, "record audit event", "action", event.Action, "error", err)
-	}
+	return event, nil
 }
 
 // NormalizeEmail is the canonical form for lookup, rate-limit keys, and

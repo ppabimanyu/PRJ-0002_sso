@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { healthClient } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 export function useHealth() {
   return useQuery({
     queryKey: ["health", "ready"],
     queryFn: async () => {
-      const { data } = await healthClient.GET("/readyz");
+      const { data } = await apiClient.GET("/readyz");
 
       if (!data) {
         throw new Error("Readiness check returned an empty response");

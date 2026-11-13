@@ -39,7 +39,7 @@ frontend/
   src/components/shared/   Komponen lintas fitur
   src/features/            Fitur per project
   src/hooks/               Hook bersama
-  src/lib/                 API client, config, util
+  src/lib/                 API client, error mapping, util
   src/types/               Tipe hasil generate
 deploy/                    Compose, nginx, konfigurasi observability
 docs/architecture.md       Arsitektur lengkap
@@ -185,7 +185,7 @@ Semua variabel ada di `.env.example`. Docker Compose dan Vite membaca `.env` yan
 | `DATABASE_URL` | wajib | Koneksi PostgreSQL |
 | `REDIS_URL` | wajib | Koneksi Redis |
 | `CORS_ALLOWED_ORIGINS` | kosong | Origin browser yang diizinkan, dipisah koma |
-| `TRUSTED_PROXY_CIDRS` | kosong | CIDR reverse proxy yang boleh mengirim `X-Forwarded-For` |
+| `TRUSTED_PROXY_CIDRS` | kosong (compose: `172.28.0.0/24`) | CIDR reverse proxy yang boleh mengirim `X-Forwarded-For` |
 | `RATE_LIMIT_REQUESTS` | `60` | Jumlah request per window |
 | `RATE_LIMIT_WINDOW` | `1m` | Panjang window rate limit |
 | `SESSION_IDLE_TTL` | `720h` | Batas idle Session |
@@ -198,11 +198,10 @@ Semua variabel ada di `.env.example`. Docker Compose dan Vite membaca `.env` yan
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | kosong | Endpoint OTLP, kosong berarti export dimatikan |
 | `OTEL_SERVICE_NAME` | `sso-api` | Nama service di trace |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` | Rasio sampling trace |
-| `VITE_API_URL` | kosong | Origin API; kosong berarti same-origin |
 
 Login dibatasi 10 kegagalan per 15 menit untuk pasangan akun dan IP, lalu ditahan sementara. Counter disimpan di Redis dengan fallback in-process agar brute force tetap terbatas saat Redis tidak tersedia. Counter direset setelah login sukses.
 
-Rate limit memakai Redis dan fail-open. Jika Redis tidak tersedia, request tetap dilayani dan error dicatat di log.
+Rate limit memakai Redis dan fail-open. Jika Redis tidak tersedia, request tetap dilayani dan error dicatat di log. Di belakang reverse proxy, isi `TRUSTED_PROXY_CIDRS` agar lockout login memakai IP klien, bukan IP proxy.
 
 ## Deployment
 

@@ -63,6 +63,7 @@ type fakeSessions struct {
 	sessions map[string]domain.Session
 	revoked  map[uuid.UUID]bool
 	touched  map[uuid.UUID]bool
+	events   []domain.AuditEvent
 }
 
 func newFakeSessions() *fakeSessions {
@@ -73,8 +74,16 @@ func newFakeSessions() *fakeSessions {
 	}
 }
 
-func (f *fakeSessions) CreateSession(_ context.Context, session domain.Session, tokenHash []byte) error {
+func (f *fakeSessions) createSession(_ context.Context, session domain.Session, tokenHash []byte) error {
 	f.sessions[string(tokenHash)] = session
+	return nil
+}
+
+func (f *fakeSessions) CreateSessionWithAudit(ctx context.Context, session domain.Session, tokenHash []byte, event domain.AuditEvent) error {
+	if err := f.createSession(ctx, session, tokenHash); err != nil {
+		return err
+	}
+	f.events = append(f.events, event)
 	return nil
 }
 
@@ -159,10 +168,7 @@ func newTestService(t *testing.T, users *fakeUsers, sessions *fakeSessions, audi
 
 	service, err := NewService(
 		Config{SessionIdleTTL: time.Hour, SessionAbsoluteTTL: 24 * time.Hour},
-		users,
-		sessions,
-		audit,
-		attempts,
+		Dependencies{Users: users, Sessions: sessions, Audit: audit, Attempts: attempts},
 		slog.New(slog.NewTextHandler(testWriter{t}, nil)),
 	)
 	require.NoError(t, err)
@@ -213,9 +219,10 @@ func TestLoginCreatesSessionAndAudit(t *testing.T) {
 	assert.NotEmpty(t, result.Token)
 	assert.Equal(t, user.ID, result.Session.UserID)
 	require.Len(t, sessions.sessions, 1)
-	assert.Equal(t, domain.ActionLoginSucceeded, audit.lastAction())
+	require.Len(t, sessions.events, 1)
+	assert.Equal(t, domain.ActionLoginSucceeded, sessions.events[0].Action)
 	assert.Equal(t, 1, attempts.resets)
-	assert.Equal(t, "203.0.113.10", audit.events[0].IP)
+	assert.Equal(t, "203.0.113.10", sessions.events[0].IP)
 }
 
 func TestLoginRejectsUnknownEmailAndRecordsFailure(t *testing.T) {
@@ -281,6 +288,7 @@ func TestLogoutRevokesSessionAndAudits(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, sessions.revoked[result.Session.ID])
+	require.Len(t, sessions.events, 1)
 	assert.Equal(t, domain.ActionLogout, audit.lastAction())
 
 	_, _, err = service.AuthenticateSession(ctx, result.Token)
@@ -304,7 +312,7 @@ func TestAuthenticateSessionRejectsExpiredSession(t *testing.T) {
 		IdleExpiresAt:     clock.now.Add(-time.Minute),
 		AbsoluteExpiresAt: clock.now.Add(time.Hour),
 	}
-	require.NoError(t, sessions.CreateSession(ctx, expired, hash))
+	require.NoError(t, sessions.createSession(ctx, expired, hash))
 
 	_, _, err = service.AuthenticateSession(ctx, token)
 	require.ErrorIs(t, err, domain.ErrUnauthorized)
@@ -342,7 +350,7 @@ func TestBootstrapAdminRequiresPasswordToCreate(t *testing.T) {
 func TestSessionCookieIsHostOnlyAndSecure(t *testing.T) {
 	now := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
 
-	cookie := SessionCookie("token", 90*24*time.Hour, now)
+	cookie := SessionCookie("token", now.Add(90*24*time.Hour), now)
 
 	assert.Equal(t, SessionCookieName, cookie.Name)
 	assert.Equal(t, "token", cookie.Value)
@@ -369,7 +377,8 @@ func TestNewSessionTokenIsOpaqueAndHashed(t *testing.T) {
 func TestNewServiceRejectsIdleTTLLongerThanAbsolute(t *testing.T) {
 	_, err := NewService(
 		Config{SessionIdleTTL: 48 * time.Hour, SessionAbsoluteTTL: 24 * time.Hour},
-		&fakeUsers{}, newFakeSessions(), &fakeAudit{}, &fakeAttempts{}, nil,
+		Dependencies{Users: &fakeUsers{}, Sessions: newFakeSessions(), Audit: &fakeAudit{}, Attempts: &fakeAttempts{}},
+		nil,
 	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "idle TTL")

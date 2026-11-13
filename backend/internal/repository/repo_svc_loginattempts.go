@@ -11,10 +11,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// loginFailureWindow increments a counter and gives it a TTL on first use.
+// loginFailureWindow increments a counter, and restarts the window once the
+// failure limit is reached so a lockout always lasts the full window.
 var loginFailureWindow = redis.NewScript(`
 local current = redis.call("INCR", KEYS[1])
-if current == 1 then
+if current == 1 or tonumber(current) >= tonumber(ARGV[2]) then
 	redis.call("PEXPIRE", KEYS[1], ARGV[1])
 end
 return current
@@ -78,7 +79,7 @@ func (l *LoginAttempts) RecordFailure(ctx context.Context, email, ip string) err
 	timeoutCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
 	defer cancel()
 
-	err := loginFailureWindow.Run(timeoutCtx, l.redis, []string{key}, l.window.Milliseconds()).Err()
+	err := loginFailureWindow.Run(timeoutCtx, l.redis, []string{key}, l.window.Milliseconds(), l.limit).Err()
 	if err != nil {
 		l.recordMemoryFailure(key)
 		return nil
@@ -156,17 +157,20 @@ func (l *LoginAttempts) recordMemoryFailure(key string) {
 	entry, ok := l.failures[key]
 	if !ok {
 		if len(l.failures) >= maxMemoryFailures {
-			l.evictMemoryLocked(now)
+			l.makeRoomMemoryLocked(now)
 		}
 	}
 	if !ok || !now.Before(entry.expiresAt) {
 		entry = memoryFailure{expiresAt: now.Add(l.window)}
 	}
 	entry.count++
+	if entry.count == 1 || entry.count >= l.limit {
+		entry.expiresAt = now.Add(l.window)
+	}
 	l.failures[key] = entry
 }
 
-func (l *LoginAttempts) evictMemoryLocked(now time.Time) {
+func (l *LoginAttempts) makeRoomMemoryLocked(now time.Time) {
 	for key, entry := range l.failures {
 		if !now.Before(entry.expiresAt) {
 			delete(l.failures, key)
@@ -177,7 +181,7 @@ func (l *LoginAttempts) evictMemoryLocked(now time.Time) {
 	}
 	for key := range l.failures {
 		delete(l.failures, key)
-		return
+		break
 	}
 }
 

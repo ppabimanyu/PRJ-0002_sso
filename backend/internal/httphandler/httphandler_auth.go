@@ -12,7 +12,6 @@ import (
 
 	"github.com/ppabimanyu/sso/internal/auth"
 	"github.com/ppabimanyu/sso/internal/domain"
-	"github.com/ppabimanyu/sso/internal/middleware"
 	"github.com/ppabimanyu/sso/internal/pkg/problem"
 	"github.com/ppabimanyu/sso/internal/pkg/validate"
 )
@@ -60,11 +59,17 @@ type SessionContext struct {
 type AuthHandler struct {
 	service *auth.Service
 	logger  *slog.Logger
+	meta    RequestMetaFunc
 }
 
-// NewAuthHandler builds the auth HTTP surface.
-func NewAuthHandler(service *auth.Service, logger *slog.Logger) *AuthHandler {
-	return &AuthHandler{service: service, logger: logger}
+// RequestMetaFunc supplies transport metadata from the router wiring, which is
+// the only layer allowed to import middleware.
+type RequestMetaFunc func(*http.Request) auth.RequestMeta
+
+// NewAuthHandler builds the auth HTTP surface. meta may be nil in tests that do
+// not care about Audit Event request metadata.
+func NewAuthHandler(service *auth.Service, logger *slog.Logger, meta RequestMetaFunc) *AuthHandler {
+	return &AuthHandler{service: service, logger: logger, meta: meta}
 }
 
 // Login godoc
@@ -95,14 +100,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	result, err := h.service.Login(r.Context(), auth.LoginInput{
 		Email:       request.Email,
 		Password:    request.Password,
-		RequestMeta: requestMeta(r),
+		RequestMeta: h.requestMeta(r),
 	})
 	if err != nil {
 		h.writeLoginError(w, r, err)
 		return
 	}
 
-	http.SetCookie(w, auth.SessionCookie(result.Token, result.Session.AbsoluteExpiresAt.Sub(result.Session.CreatedAt), result.Session.CreatedAt))
+	http.SetCookie(w, auth.SessionCookie(result.Token, result.Session.AbsoluteExpiresAt, result.Session.CreatedAt))
 	writeJSON(w, http.StatusOK, LoginResponse{User: newUserResponse(result.User)})
 }
 
@@ -114,8 +119,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 // @Router /api/v1/auth/logout [post]
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(auth.SessionCookieName); err == nil {
-		if err := h.service.Logout(r.Context(), cookie.Value, requestMeta(r)); err != nil {
-			h.logger.WarnContext(r.Context(), "logout failed", "error", err)
+		if err := h.service.Logout(r.Context(), cookie.Value, h.requestMeta(r)); err != nil {
+			http.SetCookie(w, auth.ExpiredSessionCookie())
+			problem.Write(w, r, err, h.logger)
+			return
 		}
 	}
 
@@ -131,13 +138,7 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} SessionResponse
 // @Router /api/v1/auth/session [get]
 func (h *AuthHandler) Session(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil {
-		writeJSON(w, http.StatusOK, SessionResponse{Authenticated: false})
-		return
-	}
-
-	user, session, err := h.service.AuthenticateSession(r.Context(), cookie.Value)
+	user, session, err := h.resolveSession(r)
 	if err != nil {
 		if !errors.Is(err, domain.ErrUnauthorized) {
 			problem.Write(w, r, err, h.logger)
@@ -178,13 +179,7 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 // Session in the request context.
 func (h *AuthHandler) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(auth.SessionCookieName)
-		if err != nil {
-			h.writeUnauthorized(w, r)
-			return
-		}
-
-		user, session, err := h.service.AuthenticateSession(r.Context(), cookie.Value)
+		user, session, err := h.resolveSession(r)
 		if err != nil {
 			if !errors.Is(err, domain.ErrUnauthorized) {
 				problem.Write(w, r, err, h.logger)
@@ -197,6 +192,14 @@ func (h *AuthHandler) RequireSession(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), sessionContextKey{}, SessionContext{User: user, Session: session})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (h *AuthHandler) resolveSession(r *http.Request) (domain.User, domain.Session, error) {
+	cookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil {
+		return domain.User{}, domain.Session{}, domain.ErrUnauthorized
+	}
+	return h.service.AuthenticateSession(r.Context(), cookie.Value)
 }
 
 // SessionFromContext returns the authenticated User and Session for routed
@@ -240,10 +243,9 @@ func newUserResponse(user domain.User) UserResponse {
 	}
 }
 
-func requestMeta(r *http.Request) auth.RequestMeta {
-	return auth.RequestMeta{
-		IP:        middleware.ClientIP(r),
-		UserAgent: r.UserAgent(),
-		RequestID: middleware.RequestIDFromContext(r.Context()),
+func (h *AuthHandler) requestMeta(r *http.Request) auth.RequestMeta {
+	if h.meta == nil {
+		return auth.RequestMeta{}
 	}
+	return h.meta(r)
 }

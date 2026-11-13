@@ -57,6 +57,7 @@ services:
     environment:
       DATABASE_URL: postgres://app:app@db:5432/app?sslmode=disable
       REDIS_URL: redis://redis:6379/0
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-172.28.0.0/24}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     depends_on:
       db:
@@ -66,14 +67,13 @@ services:
       migrate:
         condition: service_completed_successfully
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     restart: unless-stopped
 
   frontend:
     build:
       context: ../frontend
       args:
-        VITE_API_URL: ${VITE_API_URL:-}
         VITE_APP_NAME: ${VITE_APP_NAME:-SSO}
         VITE_MAINTENANCE_MODE: ${VITE_MAINTENANCE_MODE:-false}
     depends_on:
@@ -110,3 +110,9 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

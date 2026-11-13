@@ -13,10 +13,10 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
@@ -29,6 +29,7 @@ import (
 
 	"github.com/ppabimanyu/sso/internal/auth"
 	"github.com/ppabimanyu/sso/internal/httphandler"
+	"github.com/ppabimanyu/sso/internal/middleware"
 	"github.com/ppabimanyu/sso/internal/repository"
 )
 
@@ -39,6 +40,8 @@ const (
 
 type appOptions struct {
 	loginMaxFailures int
+	loginWindow      time.Duration
+	requestLimit     int
 	idleTTL          time.Duration
 	absoluteTTL      time.Duration
 }
@@ -47,6 +50,7 @@ type testApp struct {
 	server *httptest.Server
 	client *http.Client
 	pool   *pgxpool.Pool
+	redis  *redis.Client
 }
 
 func newTestApp(t *testing.T, options appOptions) *testApp {
@@ -54,6 +58,9 @@ func newTestApp(t *testing.T, options appOptions) *testApp {
 
 	if options.loginMaxFailures == 0 {
 		options.loginMaxFailures = 10
+	}
+	if options.loginWindow == 0 {
+		options.loginWindow = 15 * time.Minute
 	}
 	if options.idleTTL == 0 {
 		options.idleTTL = time.Hour
@@ -91,26 +98,44 @@ func newTestApp(t *testing.T, options appOptions) *testApp {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 
-	redisServer := miniredis.RunT(t)
-	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	redisContainer, err := testcontainers.Run(ctx, "redis:7-alpine",
+		testcontainers.WithExposedPorts("6379/tcp"),
+		testcontainers.WithWaitStrategy(
+			wait.ForListeningPort("6379/tcp").WithStartupTimeout(30*time.Second),
+		),
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = redisContainer.Terminate(ctx) })
+
+	redisEndpoint, err := redisContainer.Endpoint(ctx, "")
+	require.NoError(t, err)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisEndpoint})
 	t.Cleanup(func() { _ = redisClient.Close() })
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	store := repository.NewPgAuth(pool)
 	service, err := auth.NewService(
 		auth.Config{SessionIdleTTL: options.idleTTL, SessionAbsoluteTTL: options.absoluteTTL},
-		store,
-		store,
-		store,
-		repository.NewLoginAttempts(redisClient, options.loginMaxFailures, 15*time.Minute),
+		auth.Dependencies{
+			Users:    store,
+			Sessions: store,
+			Audit:    store,
+			Attempts: repository.NewLoginAttempts(redisClient, options.loginMaxFailures, options.loginWindow),
+		},
 		logger,
 	)
 	require.NoError(t, err)
 	require.NoError(t, service.BootstrapAdmin(ctx, adminEmail, adminPassword))
 
+	var rateLimit func(http.Handler) http.Handler
+	if options.requestLimit > 0 {
+		rateLimit = middleware.RateLimit(redisClient, options.requestLimit, time.Minute, logger)
+	}
+
 	router := httphandler.NewRouter(httphandler.RouterOptions{
 		Logger:       logger,
 		MaxBodyBytes: 1 << 20,
+		RateLimit:    rateLimit,
 		AuthService:  service,
 	})
 	server := httptest.NewTLSServer(router)
@@ -121,7 +146,12 @@ func newTestApp(t *testing.T, options appOptions) *testApp {
 	client := server.Client()
 	client.Jar = jar
 
-	return &testApp{server: server, client: client, pool: pool}
+	return &testApp{server: server, client: client, pool: pool, redis: redisClient}
+}
+
+func (a *testApp) closeRedis(t *testing.T) {
+	t.Helper()
+	require.NoError(t, a.redis.Close())
 }
 
 func (a *testApp) request(t *testing.T, method, path string, body any) *http.Response {
@@ -166,6 +196,8 @@ func decodeBody[T any](t *testing.T, response *http.Response) T {
 func (a *testApp) auditCount(t *testing.T, action string, metadataKey, metadataValue string) int {
 	t.Helper()
 
+	// No Audit Event read API exists until #19, so the test inspects the table
+	// directly. The login behavior itself is still asserted over HTTP.
 	query := `SELECT count(*) FROM audit_events WHERE action = $1`
 	arguments := []any{action}
 	if metadataKey != "" {
@@ -241,6 +273,8 @@ func TestBootstrapAdminCanLoginSeeProfileAndLogout(t *testing.T) {
 func TestDisabledUserCannotLogin(t *testing.T) {
 	app := newTestApp(t, appOptions{})
 
+	// Admin user management does not exist until #19, so the disable is a setup
+	// step. The assertion still goes through the login endpoint.
 	_, err := app.pool.Exec(context.Background(), `UPDATE users SET disabled_at = now() WHERE email = $1`, adminEmail)
 	require.NoError(t, err)
 
@@ -285,6 +319,38 @@ func TestLoginLocksOutAfterRepeatedFailures(t *testing.T) {
 	assert.NotEmpty(t, blocked.Header.Get("Retry-After"))
 	assert.Zero(t, app.sessionCount(t))
 	assert.Equal(t, 1, app.auditCount(t, "auth.login.failed", "reason", "rate_limited"))
+}
+
+func TestLoginEndpointIsRateLimited(t *testing.T) {
+	app := newTestApp(t, appOptions{requestLimit: 2})
+
+	for range 2 {
+		response := app.login(t, "incorrect horse battery staple")
+		require.Equal(t, http.StatusUnauthorized, response.StatusCode)
+	}
+
+	limited := app.login(t, "incorrect horse battery staple")
+	require.Equal(t, http.StatusTooManyRequests, limited.StatusCode)
+	assert.NotEmpty(t, limited.Header.Get("Retry-After"))
+}
+
+func TestLoginLockoutFallsBackToProcessMemoryWhenRedisIsDown(t *testing.T) {
+	app := newTestApp(t, appOptions{loginMaxFailures: 3, loginWindow: 5 * time.Second})
+	app.closeRedis(t)
+
+	for range 2 {
+		require.Equal(t, http.StatusUnauthorized, app.login(t, "incorrect horse battery staple").StatusCode)
+	}
+	// The first window is nearly over when the threshold is reached. The
+	// fallback must start a full new window, like the Redis path does.
+	time.Sleep(3 * time.Second)
+	require.Equal(t, http.StatusUnauthorized, app.login(t, "incorrect horse battery staple").StatusCode)
+
+	blocked := app.login(t, adminPassword)
+	require.Equal(t, http.StatusTooManyRequests, blocked.StatusCode)
+	retryAfter, err := strconv.Atoi(blocked.Header.Get("Retry-After"))
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, retryAfter, 4)
 }
 
 func TestSuccessfulLoginResetsTheFailureCounter(t *testing.T) {

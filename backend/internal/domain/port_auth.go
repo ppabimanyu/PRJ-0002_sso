@@ -15,9 +15,14 @@ type UserStore interface {
 	CreateUserWithPassword(ctx context.Context, user User, passwordHash string) error
 }
 
+// Auth methods recorded on a Session.
+const (
+	AuthMethodPassword = "password"
+)
+
 // SessionStore persists hashed Session tokens.
 type SessionStore interface {
-	CreateSession(ctx context.Context, session Session, tokenHash []byte) error
+	CreateSessionWithAudit(ctx context.Context, session Session, tokenHash []byte, event AuditEvent) error
 	SessionByTokenHash(ctx context.Context, tokenHash []byte) (Session, error)
 	TouchSession(ctx context.Context, sessionID uuid.UUID, lastSeenAt, idleExpiresAt time.Time) error
 	RevokeSession(ctx context.Context, sessionID uuid.UUID, revokedAt time.Time) error
