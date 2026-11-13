@@ -1,0 +1,21 @@
+# Build and test artifacts
+bin/
+tmp/
+coverage/
+coverage.*
+*.out
+*.test
+
+# Local tooling
+.air.toml
+.golangci.yml
+
+# Documentation and repository metadata
+docs/
+*.md
+.git/
+.gitignore
+
+# The Dockerfile is not needed inside the build context.
+Dockerfile
+.dockerignore
